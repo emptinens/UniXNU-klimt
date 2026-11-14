@@ -3,6 +3,7 @@
 // native-ufs-probe=1 is present. This is a register probe, not a storage driver.
 #include <IOKit/IOService.h>
 #include <IOKit/IOPlatformExpert.h>
+#include <IOKit/IODeviceTreeSupport.h>
 #include <IOKit/storage/IOBlockStorageDevice.h>
 #include <libkern/crypto/sha2.h>
 #include <vm/vm_kern.h>
@@ -1712,6 +1713,12 @@ bool NativeUfs::start (IOService *provider)
   // Default: match for observability only, never touch the controller. Hardware work runs once,
   // from the root-device personality; the ufshc nub match stays observation-only.
   if ((!probe && !rootMode) || !OSDynamicCast (IOPlatformExpertDevice, provider)) {
+    return false;
+  }
+  // Hardware qualification guard: in QEMU (no /arm-io/ufs in DT), skip physical MMIO probe.
+  IORegistryEntry *ufsNode = IORegistryEntry::fromPath ("/arm-io/ufs", gIODTPlane);
+  if (!ufsNode) {
+    IOLog ("NativeUfs: /arm-io/ufs not present in device tree; skipping probe\n");
     return false;
   }
   unsigned diagnostic = 0;
