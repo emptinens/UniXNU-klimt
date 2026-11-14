@@ -1210,6 +1210,8 @@ extern "C" unsigned native_ufs_store_gpt_check (void)
 // One read-only window of the root image as a block device: 512-byte sectors on top of 4096-byte
 // UFS blocks, so the unchanged dmg disk images (GPT with 512-byte sectors) parse as they do on
 // the virtio path.
+OSDefineMetaClassAndAbstractStructors (IOBlockStorageDevice, IOService)
+
 class NativeUfsBlock : public IOBlockStorageDevice {
   OSDeclareDefaultStructors (NativeUfsBlock)
   uint64_t absolute = 0;      // byte offset of the window on LUN 0

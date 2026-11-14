@@ -43,7 +43,7 @@ def compile_source(source, output):
     version = os.environ.get("UNIXNU_XNU_VERSION", "")
     if not darwin or not version or any(char not in "0123456789." for char in darwin + version):
         raise SystemExit("The Dali checkpoint requires pinned numeric XNU Darwin and build versions")
-    command = ["xcrun", "--sdk", "iphoneos", "clang++", *record_args[1:],
+    command = ["xcrun", "--sdk", "iphoneos", "clang++", f"-I{source.parent}", *record_args[1:],
                f'-DDALI_XNU_DARWIN="{darwin}"', f'-DDALI_XNU_BUILD="{version}"']
     replaced = False
     index = 4  # xcrun, --sdk, iphoneos, clang++
