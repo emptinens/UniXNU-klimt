@@ -175,6 +175,10 @@ def main():
                 chosen_fdt.get("mrdump,lk") != b"MRDUMP11\0" or
                 len(chosen_fdt.get("mrdump,cblock", b"")) != 8):
             raise ValueError("runtime AEE mini/MRDUMP11 recovery contract differs")
+        ufs_regs = tree.reg("/soc/ufshci@16810000")
+        if (b"mediatek,mt8183-ufshci" not in tree.string_list("/soc/ufshci@16810000", "compatible") or
+                ufs_regs != [(0x16810000, 0x2A00)]):
+            raise ValueError(f"runtime UFS controller differs: {ufs_regs}")
     except (OSError, ValueError, KeyError, struct.error) as error:
         raise SystemExit(f"Dali FDT validation failed: {error}") from None
 
@@ -209,6 +213,11 @@ def main():
         *([("RAMDisk", bytes(16))] if args.ramdisk else []),
         *([("TrustCache", bytes(16))] if args.trust_cache else []),
     ])])
+    ufs = apple_node("ufs", [
+        ("compatible", b"mediatek,mt8183-ufshci\0"),
+        ("reg", struct.pack("<4Q", 0x16810000, 0x2A00, 0, 0)),
+        ("interrupts", struct.pack("<3I", 0, 320, 4)),
+    ])
     root_node = apple_node("device-tree", [
         ("model", b"REDMI K80 Ultra\0"),
         ("compatible", b"xiaomi,dali\0"),
@@ -219,8 +228,8 @@ def main():
             ("device_type", b"arm-io\0"),
             ("#address-cells", struct.pack("<I", 2)),
             ("#size-cells", struct.pack("<I", 2)),
-            ("ranges", struct.pack("<QQQ", 0, 0x0C000000, 0x01000000)),
-        ], [intc, boot_log]),
+            ("ranges", struct.pack("<QQQQQQ", 0, 0x0C000000, 0x01000000, 0x16000000, 0x16000000, 0x01000000)),
+        ], [intc, boot_log, ufs]),
         apple_node("defaults", [("sleep-disabled", struct.pack("<I", 1))]),
         apple_node("options"),
         apple_node("product", [

@@ -46,7 +46,7 @@ dram_size = "0x300000000"
 timeout = 10
 # Qualified with the source-only kernel's typed-allocation metadata. The
 # upstream default exceeds kalloc's 32-zone per-size scratch array here.
-kernel_args = ["-v", "dali-earlyboot=1", "kt_fixed_zones=120"]
+kernel_args = ["-v", "dali-earlyboot=1", "kt_fixed_zones=120", "native-ufs-probe=10"]
 
 [payload.adt]
 tool = "scripts/make-dali-adt.py"

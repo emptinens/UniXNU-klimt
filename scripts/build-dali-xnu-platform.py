@@ -97,6 +97,7 @@ sources = {
     "armdt": (ROOT / "drivers/ArmDTPlatform/ArmDTPlatform.cpp", ROOT / "build/armdt-platform/libArmDTPlatform.a"),
     "armcpu": (ROOT / "drivers/ArmCpu/ArmCpu.cpp", ROOT / "build/armcpu/libArmCpu.a"),
     "dali-log": (ROOT / "drivers/DaliBootLog/DaliBootLog.cpp", OUT / "libDaliBootLog.a"),
+    "native-ufs": (ROOT / "drivers/NativeUfs/NativeUfs.cpp", ROOT / "build/native-ufs/libNativeUfs.a"),
 }
 report = {name: archive(name, *pair) for name, pair in sources.items()}
 report["xnu_version"] = {"darwin": os.environ["UNIXNU_XNU_DARWIN"], "build": os.environ["UNIXNU_XNU_VERSION"]}
@@ -104,4 +105,4 @@ report["compile_record"] = str(record_path.relative_to(ROOT))
 report["compile_record_sha256"] = hashlib.sha256(record_path.read_bytes()).hexdigest()
 OUT.mkdir(parents=True, exist_ok=True)
 (OUT / "build-report.json").write_text(json.dumps(report, indent=2) + "\n")
-print("PASS: Dali logging, ArmDTPlatform, and ArmCpu archives built")
+print("PASS: Dali logging, ArmDTPlatform, ArmCpu, and NativeUfs archives built")
