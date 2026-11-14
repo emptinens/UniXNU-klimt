@@ -1236,6 +1236,7 @@ static char gRootMediaText[1000];
 // when called from an IRQ while the transport is busy: no locks, allocations,
 // MMIO reads, queue resets, or changes to the command/trust state. Fields can
 // represent adjacent updates; this is explicitly not an atomic HW snapshot.
+extern "C" void native_ufs_progress_text (char *out, size_t size);
 extern "C" void native_ufs_progress_text (char *out, size_t size)
 {
   UfsRootDiagnostics sample = gRootDiagnostic;
@@ -1281,13 +1282,13 @@ bool NativeUfsBlock::configure (const char *name, uint64_t absoluteOffset, uint6
 #endif
 }
 
-#if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
 volatile uint64_t native_ufs_verified_blocks = 0;
 // Time spent hashing/verifying and reading from the UFS transport, in generic-timer ticks (diagnostic only).
 volatile uint64_t native_ufs_verify_ticks = 0, native_ufs_read_ticks = 0;
 static inline uint64_t timerTicks (void) {uint64_t v; __asm__ volatile ("isb\n\tmrs %0, cntpct_el0" : "=r" (v)); return v;}
 volatile uint32_t native_ufs_integrity_failures = 0;
 
+#if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
 bool NativeUfsBlock::configureVerification ()
 {
   gRootDiagnostic.stage = "policy selection";
