@@ -347,8 +347,10 @@ public:
       dali_bootstrap_log("DALI:DL console mapping failed; early sink retained\n");
       return false;
     }
-    if (pid1Mode == 1) {
-      dali_bootstrap_log("DALI:DL console mapped; retaining single-CPU early sink for PID1\n");
+    unsigned ufsProbe = 0;
+    PE_parse_boot_argn ("native-ufs-probe", &ufsProbe, sizeof (ufsProbe));
+    if (pid1Mode == 1 || ufsProbe != 0) {
+      dali_bootstrap_log("DALI:DL console mapped; retaining single-CPU early sink for probe/PID1\n");
     } else {
       dali_bootstrap_log("DALI:DL console mapped; early sink ending\n");
       dali_bootstrap_log_end();

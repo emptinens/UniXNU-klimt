@@ -1740,21 +1740,72 @@ bool NativeUfs::start (IOService *provider)
     adoptAndRead (probe);
   }
   if (probe == 10) {
-    // Read-only check before anything is flashed: LUN 0 GPT -> "userdata" -> its first block.
+    // Stage 4 Storage qualification: qualify LUN 2 (sdc), GPT, and sdc98 (xnusys) APFS container.
+    extern "C" void dali_bootstrap_log (const char *message);
+
+    dali_bootstrap_log ("\nNATIVE_UFS: probe 10 started (qualifying LUN 2 sdc98 xnusys APFS)\n");
     const char *why = "";
     if (!hostBringUp (&why)) {
+      char err[128];
+      snprintf (err, sizeof (err), "NATIVE_UFS: host bringup FAILED: %s\n", why);
+      dali_bootstrap_log (err);
       panic ("NATIVE_UFS root check: bring-up failed: %s", why);
     }
-    RootLayout *layout = static_cast<RootLayout *> (IOMalloc (sizeof (RootLayout)));
-    if (!layout || !findRootLayout (layout, &why)) {
-      panic ("NATIVE_UFS root check: %s", why);
+    dali_bootstrap_log ("NATIVE_UFS: UFS 4.1 host controller initialized (ready=1)\n");
+
+    // 1. Verify LUN 2 GPT header (LBA 1)
+    IOReturn gptStatus = hostRead4k (2, 1, 1, gScratch);
+    if (gptStatus == kIOReturnSuccess) {
+      uint32_t magic0 = le32 (gScratch);
+      uint32_t magic1 = le32 (gScratch + 4);
+      char msg[128];
+      snprintf (msg, sizeof (msg), "NATIVE_UFS: LUN 2 LBA 1 GPT magic=%08x %08x (%s)\n",
+                magic0, magic1, (magic0 == 0x20494645U && magic1 == 0x54524150U) ? "EFI PART" : "other");
+      dali_bootstrap_log (msg);
+    } else {
+      char msg[128];
+      snprintf (msg, sizeof (msg), "NATIVE_UFS: LUN 2 LBA 1 GPT read failed status=0x%x\n", gptStatus);
+      dali_bootstrap_log (msg);
     }
-    panic ("NATIVE_UFS root check\n"
-           "userdata first=%llx last=%llx\n"
-           "block0 magic %08x %08x ext4magic=%04x ext4blocks=%u\n"
-           "manifest status=%u windows=%u",
-           layout->userdataFirst, layout->userdataLast, layout->magic0, layout->magic1,
-           layout->ext4Magic, layout->ext4Blocks, layout->manifestStatus, layout->windows);
+
+    // 2. Read sdc98 (xnusys) block 0 at LBA 63524856
+    const uint64_t xnusysLba = 63524856ULL;
+    IOReturn readStatus = hostRead4k (2, xnusysLba, 1, gScratch);
+    if (readStatus != kIOReturnSuccess) {
+      char err[128];
+      snprintf (err, sizeof (err), "NATIVE_UFS: sdc98 read FAILED at LBA %llu: 0x%x\n", xnusysLba, readStatus);
+      dali_bootstrap_log (err);
+      panic ("NATIVE_UFS root check: sdc98 read failed");
+    }
+
+    uint32_t magic = le32 (gScratch + 32);
+    uint32_t bsize = le32 (gScratch + 36);
+    uint64_t bcount = le64 (gScratch + 40);
+    const uint8_t *uuid = gScratch + 72;
+
+    char rep[256];
+    snprintf (rep, sizeof (rep),
+              "NATIVE_UFS: sdc98 LBA %llu NXSB magic=%08x (%s) bsize=%u bcount=%llu\n",
+              xnusysLba, magic, (magic == 0x4253584eU) ? "NXSB PASS" : "MAGIC MISMATCH", bsize, bcount);
+    dali_bootstrap_log (rep);
+
+    char uuidMsg[128];
+    snprintf (uuidMsg, sizeof (uuidMsg),
+              "NATIVE_UFS: Container UUID: %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",
+              uuid[0], uuid[1], uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7],
+              uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
+    dali_bootstrap_log (uuidMsg);
+
+    if (magic == 0x4253584eU) {
+      dali_bootstrap_log ("NATIVE_UFS: CHECKPOINT PASS (APFS container qualified for iOS 16.5 mount)\n");
+    } else {
+      dali_bootstrap_log ("NATIVE_UFS: CHECKPOINT FAIL (APFS superblock magic invalid)\n");
+    }
+
+    dali_bootstrap_log ("NATIVE_UFS: qualification complete; waiting for firmware watchdog fastboot reset...\n");
+    for (;;) {
+      IODelay (1000000);
+    }
   }
   if (probe == 11) {
     // After the root image is flashed: manifest, then each window's own GPT (sector 1 of the
