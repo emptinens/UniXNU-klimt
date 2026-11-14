@@ -1,0 +1,13 @@
+diff --git a/bsd/kern/mach_loader.c b/bsd/kern/mach_loader.c
+index 4435c16..6543210 100644
+--- a/bsd/kern/mach_loader.c
++++ b/bsd/kern/mach_loader.c
+@@ -1308,7 +1308,7 @@ parse_machfile(
+ 					/*
+ 					 * Allow injections to be ignored on devices w/o enforcement enabled
+ 					 */
+-					if (!cs_process_global_enforcement()) {
++					if (!cs_process_global_enforcement() && proc_getpid(p) != 1) {
+ 						ret = LOAD_SUCCESS; /* ignore error */
+ 					}
+ 				} else {
