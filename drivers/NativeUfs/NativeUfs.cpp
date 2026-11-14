@@ -281,50 +281,16 @@ static void zero32 (void *start, size_t length)
 static void smmuBypassStream (uint16_t stream, OSSharedPtr<IOMemoryMap> &keep, uint32_t *report,
                               uint64_t dma, uint64_t bytes)
 {
+  (void) stream;
+  (void) keep;
+  (void) dma;
+  (void) bytes;
   // MediaTek MT6991: UFS DMA is direct physical 1:1 bypass; no Qualcomm SMMUv2.
   if (report) {
     report[0] = 0;
     report[1] = 0;
     report[2] = 0;
   }
-  return;
-  uintptr_t smmu = 0;
-  if (!smmu) {
-  UfsSmmuPlan plan = planUfsSmmu (stream, dma, bytes, [smmu](unsigned offset) { return read32 (smmu, offset); });
-  gRootDiagnostic.smmuId1 = read32 (smmu, 0x24);
-  gRootDiagnostic.smmuId2 = read32 (smmu, 0x28);
-  gRootDiagnostic.smmuSlot = plan.slot;
-  if (plan.error) {
-    gRootDiagnostic.stage = "SMMU planning";
-    gRootDiagnostic.result = static_cast<uint32_t> (kIOReturnNotReady);
-    gRootDiagnostic.smr = plan.smr; gRootDiagnostic.s2cr = plan.s2cr;
-    rootDiagnosticFailure (plan.error);
-    panic ("NATIVE_UFS smmu: %s slot=%u smr=%x s2cr=%x", plan.error, plan.slot, plan.smr, plan.s2cr);
-  }
-  unsigned bank = plan.bank, index = plan.slot;
-  uintptr_t cb = smmu + (plan.pages + bank) * 4096;
-  const char *failure = configureUfsSmmu (plan, stream,
-    [smmu](unsigned offset) { return read32 (smmu, offset); },
-    [smmu](unsigned offset, uint32_t value) {
-      write32 (smmu, offset, value);
-      __asm__ volatile ("dsb sy" ::: "memory");
-    });
-  uint32_t smr = read32 (smmu, 0x800 + 4 * index), s2cr = read32 (smmu, 0xc00 + 4 * index);
-  uint32_t cbar = read32 (smmu, 0x1000 + 4 * bank), sctlr = read32 (cb, 0x0);
-  gRootDiagnostic.smr = smr; gRootDiagnostic.s2cr = s2cr;
-  gRootDiagnostic.cbar = cbar; gRootDiagnostic.sctlr = sctlr;
-  gRootDiagnostic.smmuId2 = read32 (smmu, 0x28);
-  gRootDiagnostic.cba2r = read32 (smmu, 0x1800 + 4 * bank);
-  if (failure) {
-    gRootDiagnostic.stage = "SMMU readback";
-    gRootDiagnostic.result = static_cast<uint32_t> (kIOReturnNotReady);
-    rootDiagnosticFailure (failure);
-    panic ("NATIVE_UFS smmu: %s idx=%u bank=%u cba2r=%x", failure, index, bank,
-           gRootDiagnostic.cba2r);
-  }
-  report[0] = index | (bank << 16);
-  report[1] = cbar;
-  report[2] = sctlr;
 }
 
 void NativeUfs::adoptAndRead (unsigned level)
