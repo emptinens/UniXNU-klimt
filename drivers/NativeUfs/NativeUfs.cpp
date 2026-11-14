@@ -35,6 +35,11 @@ extern const uint8_t verified_root_key[];
 #include "TransferPoll.h"
 #include "SmmuTakeover.h"
 
+extern "C" {
+void dali_bootstrap_log (const char *message);
+void dali_bootstrap_log_end (void);
+}
+
 static UfsRootDiagnostics gRootDiagnostic;
 static bool gRootDiagnosticEnabled;
 static void rootDiagnosticFailure (const char *reason);
@@ -1741,8 +1746,6 @@ bool NativeUfs::start (IOService *provider)
   }
   if (probe == 10) {
     // Stage 4 Storage qualification: qualify LUN 2 (sdc), GPT, and sdc98 (xnusys) APFS container.
-    extern "C" void dali_bootstrap_log (const char *message);
-
     dali_bootstrap_log ("\nNATIVE_UFS: probe 10 started (qualifying LUN 2 sdc98 xnusys APFS)\n");
     const char *why = "";
     if (!hostBringUp (&why)) {
@@ -1764,7 +1767,7 @@ bool NativeUfs::start (IOService *provider)
       dali_bootstrap_log (msg);
     } else {
       char msg[128];
-      snprintf (msg, sizeof (msg), "NATIVE_UFS: LUN 2 LBA 1 GPT read failed status=0x%x\n", gptStatus);
+      snprintf (msg, sizeof (msg), "NATIVE_UFS: LUN 2 LBA 1 GPT read failed status=0x%x\n", (unsigned int)gptStatus);
       dali_bootstrap_log (msg);
     }
 
@@ -1773,7 +1776,8 @@ bool NativeUfs::start (IOService *provider)
     IOReturn readStatus = hostRead4k (2, xnusysLba, 1, gScratch);
     if (readStatus != kIOReturnSuccess) {
       char err[128];
-      snprintf (err, sizeof (err), "NATIVE_UFS: sdc98 read FAILED at LBA %llu: 0x%x\n", xnusysLba, readStatus);
+      snprintf (err, sizeof (err), "NATIVE_UFS: sdc98 read FAILED at LBA %llu: 0x%x\n",
+                (unsigned long long)xnusysLba, (unsigned int)readStatus);
       dali_bootstrap_log (err);
       panic ("NATIVE_UFS root check: sdc98 read failed");
     }
@@ -1786,7 +1790,8 @@ bool NativeUfs::start (IOService *provider)
     char rep[256];
     snprintf (rep, sizeof (rep),
               "NATIVE_UFS: sdc98 LBA %llu NXSB magic=%08x (%s) bsize=%u bcount=%llu\n",
-              xnusysLba, magic, (magic == 0x4253584eU) ? "NXSB PASS" : "MAGIC MISMATCH", bsize, bcount);
+              (unsigned long long)xnusysLba, magic, (magic == 0x4253584eU) ? "NXSB PASS" : "MAGIC MISMATCH",
+              bsize, (unsigned long long)bcount);
     dali_bootstrap_log (rep);
 
     char uuidMsg[128];
