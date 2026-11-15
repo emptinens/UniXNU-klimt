@@ -215,8 +215,7 @@ def main():
     ])])
     ufs = apple_node("ufs", [
         ("compatible", b"mediatek,mt8183-ufshci\0"),
-        ("reg", struct.pack("<4Q", 0x16810000, 0x2A00, 0, 0)),
-        ("interrupts", struct.pack("<3I", 0, 320, 4)),
+        ("reg", struct.pack("<2Q", 0x16810000, 0x2A00)),
     ])
     root_node = apple_node("device-tree", [
         ("model", b"REDMI K80 Ultra\0"),
