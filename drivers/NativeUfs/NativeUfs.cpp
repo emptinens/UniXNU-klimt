@@ -945,9 +945,9 @@ static bool hostBringUp (const char **why)
     IOSleep (50);
   }
   gRootDiagnostic.stage = "LUN ready";
+  uint32_t scsi = 0;
   for (unsigned attempt = 0; attempt < 20; attempt++) {
     uint8_t tur[6] = { 0, 0, 0, 0, 0, 0 };
-    uint32_t scsi = 0;
     if (hostScsi (0, tur, 6, false, 0, 200000, &scsi) == kIOReturnSuccess ||
         hostScsi (UFS_TARGET_LUN, tur, 6, false, 0, 200000, &scsi) == kIOReturnSuccess) {
       gHost.ready = true;
