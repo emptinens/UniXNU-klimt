@@ -2,15 +2,21 @@
 // Shared production command path. Included inside the root transport namespace.
 // The host harness replaces only MMIO, DMA synchronization, clock and lock primitives.
 struct HardwareTransferPort {
-  uint64_t deadline;
+  uint64_t remaining;
   uint32_t doorbell () { return read32 (gHost.hc, 0x58); }
   uint32_t interrupt () { return read32 (gHost.hc, 0x20); }
   uint32_t completedOcs () {
     cacheInvalidate (gHost.virt, 64);
     return *reinterpret_cast<volatile uint32_t *> (gHost.virt + 8) & 0xff;
   }
-  bool expired () { return mach_absolute_time () >= deadline; }
-  void delay () { IODelay (2); }
+  bool expired () {
+    if (remaining == 0) return true;
+    remaining--;
+    return false;
+  }
+  void delay () {
+    for (volatile unsigned i = 0; i < 2000; i++) __asm__ volatile ("yield");
+  }
 };
 
 static void putBe32 (uint8_t *at, uint32_t value)
@@ -78,7 +84,7 @@ static IOReturn hostSubmit (uint32_t direction, uint32_t dataBytes, uint32_t tim
   cacheCivac (gHost.virt, kDataOffset + dataBytes);
   hostWrite (0x20, 1);  // Acknowledge completion only; preserve error evidence.
   HardwareTransferPort port;
-  clock_interval_to_deadline (timeoutUs, kMicrosecondScale, &port.deadline);
+  port.remaining = timeoutUs > 0 ? timeoutUs * 50ULL : 500000ULL;
   hostWrite (0x58, 1);
   UfsTransferPoll state;
   UfsTransferEnd end = pollUfsTransfer (port, state);

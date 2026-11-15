@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // Root queue takeover; shared with the host fault-injection harness.
+static inline void ufsDelay (unsigned iters = 10000)
+{
+  for (volatile unsigned i = 0; i < iters; i++) {
+    __asm__ volatile ("yield");
+  }
+}
+
 static bool hostWaitRegister (unsigned offset, uint32_t mask, uint32_t value, unsigned loops = 10000)
 {
   for (unsigned i = 0; i < loops; i++) {
     if ((read32 (gHost.hc, offset) & mask) == value) return true;
-    IODelay (10);
+    ufsDelay (10000);
   }
   return false;
 }
@@ -44,7 +51,7 @@ static bool hostStopQueue (const char **why)
           refAck = true;
           break;
         }
-        IODelay (10);
+        ufsDelay (10000);
       }
       snprintf (refMsg, sizeof (refMsg), "NATIVE_UFS: MTK REFCLK ack=%d (0x144=0x%08x)\n",
                 refAck ? 1 : 0, read32 (gHost.hc, 0x144));
@@ -57,25 +64,34 @@ static bool hostStopQueue (const char **why)
     // 1c. Enable Host Controller (0x34 = 1)
     dali_bootstrap_log ("NATIVE_UFS: issuing HCE write (0x34=1)...\n");
     hostWrite (0x34, 1);
-    dali_bootstrap_log ("NATIVE_UFS: HCE write issued, polling readiness...\n");
+    dali_bootstrap_log ("NATIVE_UFS: HCE write issued, pausing 600us...\n");
+    ufsDelay (200000); // 600us pause
+    dali_bootstrap_log ("NATIVE_UFS: pause complete, reading 0x34...\n");
 
-    bool hceReady = false;
-    for (unsigned i = 0; i < 5000; i++) { // up to 50 ms
-      uint32_t curHce = read32 (gHost.hc, 0x34);
+    uint32_t curHce = read32 (gHost.hc, 0x34);
+    char hceMsg[96];
+    snprintf (hceMsg, sizeof (hceMsg), "NATIVE_UFS: first read 0x34=0x%08x HCS=0x%08x\n",
+              curHce, read32 (gHost.hc, 0x30));
+    dali_bootstrap_log (hceMsg);
+
+    bool hceReady = (curHce & 1) != 0;
+    for (unsigned i = 0; !hceReady && i < 2000; i++) { // up to 50 ms
+      ufsDelay (20000);
+      curHce = read32 (gHost.hc, 0x34);
       if (curHce & 1) {
         hceReady = true;
         break;
       }
-      if (i > 0 && (i % 1000) == 0) {
-        snprintf (refMsg, sizeof (refMsg), "NATIVE_UFS: HCE poll loop=%u 0x34=0x%08x\n", i, curHce);
-        dali_bootstrap_log (refMsg);
+      if ((i % 200) == 0) {
+        snprintf (hceMsg, sizeof (hceMsg), "NATIVE_UFS: HCE poll i=%u 0x34=0x%08x HCS=0x%08x\n",
+                  i, curHce, read32 (gHost.hc, 0x30));
+        dali_bootstrap_log (hceMsg);
       }
-      IODelay (10);
     }
 
-    snprintf (refMsg, sizeof (refMsg), "NATIVE_UFS: HCE ready=%d (0x34=0x%08x, HCS=0x%08x)\n",
+    snprintf (hceMsg, sizeof (hceMsg), "NATIVE_UFS: HCE ready=%d (0x34=0x%08x, HCS=0x%08x)\n",
               hceReady ? 1 : 0, read32 (gHost.hc, 0x34), read32 (gHost.hc, 0x30));
-    dali_bootstrap_log (refMsg);
+    dali_bootstrap_log (hceMsg);
 
     if (!hceReady) {
       recordTransport (kIOReturnNotReady, 15);
@@ -95,7 +111,7 @@ static bool hostStopQueue (const char **why)
         ucRdy = true;
         break;
       }
-      IODelay (10);
+      ufsDelay (10000);
     }
     char ucMsg[80];
     snprintf (ucMsg, sizeof (ucMsg), "NATIVE_UFS: UCRDY=%d (HCS=0x%08x), writing UICCMD...\n",
@@ -110,7 +126,7 @@ static bool hostStopQueue (const char **why)
         dpReady = true;
         break;
       }
-      IODelay (10);
+      ufsDelay (10000);
     }
 
     char dpMsg[80];
@@ -128,7 +144,7 @@ static bool hostStopQueue (const char **why)
   // 3. Confirm the firmware has no active transfer/task in flight.
   for (unsigned wait = 0; wait < 5000; wait++) {
     if (!read32 (gHost.hc, 0x58) && !read32 (gHost.hc, 0x78)) break;
-    IODelay (10);
+    ufsDelay (10000);
   }
   if (read32 (gHost.hc, 0x58) || read32 (gHost.hc, 0x78)) {
     recordTransport (kIOReturnBusy, 15);

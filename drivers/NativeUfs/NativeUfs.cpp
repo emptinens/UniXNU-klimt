@@ -1813,7 +1813,7 @@ bool NativeUfs::start (IOService *provider)
 
     dali_bootstrap_log ("NATIVE_UFS: qualification complete; waiting for firmware watchdog fastboot reset...\n");
     for (;;) {
-      IODelay (1000000);
+      __asm__ volatile ("wfi");
     }
   }
   if (probe == 11) {
