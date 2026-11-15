@@ -948,7 +948,8 @@ static bool hostBringUp (const char **why)
   for (unsigned attempt = 0; attempt < 20; attempt++) {
     uint8_t tur[6] = { 0, 0, 0, 0, 0, 0 };
     uint32_t scsi = 0;
-    if (hostScsi (0, tur, 6, false, 0, 200000, &scsi) == kIOReturnSuccess) {
+    if (hostScsi (0, tur, 6, false, 0, 200000, &scsi) == kIOReturnSuccess ||
+        hostScsi (UFS_TARGET_LUN, tur, 6, false, 0, 200000, &scsi) == kIOReturnSuccess) {
       gHost.ready = true;
       return true;
     }
@@ -956,7 +957,10 @@ static bool hostBringUp (const char **why)
     IOSleep (10);
   }
   gHost.ready = false;
-  *why = "LUN 0 not ready";
+  *why = "LUN not ready";
+  char turFail[80];
+  snprintf (turFail, sizeof (turFail), "NATIVE_UFS: TUR failed after 20 attempts: scsi=0x%x\n", (unsigned int)scsi);
+  dali_bootstrap_log (turFail);
   return false;
 }
 }
