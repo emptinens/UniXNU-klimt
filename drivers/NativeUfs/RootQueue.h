@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // Root queue takeover; shared with the host fault-injection harness.
-static bool hostWaitRegister (unsigned offset, uint32_t mask, uint32_t value)
+static bool hostWaitRegister (unsigned offset, uint32_t mask, uint32_t value, unsigned loops = 10000)
 {
-  uint64_t deadline;
-  clock_interval_to_deadline (100, kMillisecondScale, &deadline);
-  do {
+  for (unsigned i = 0; i < loops; i++) {
     if ((read32 (gHost.hc, offset) & mask) == value) return true;
     IODelay (10);
-  } while (mach_absolute_time () < deadline);
+  }
   return false;
 }
 
@@ -31,34 +29,50 @@ static bool hostStopQueue (const char **why)
 
   // 1. Controller must be enabled.
   if (!(hce & 1)) {
-    dali_bootstrap_log ("NATIVE_UFS: HCE disabled, enabling controller...\n");
+    dali_bootstrap_log ("NATIVE_UFS: HCE disabled, enabling controller (0x34=1)...\n");
     hostWrite (0x34, 1);
-    if (!hostWaitRegister (0x34, 1, 1)) {
+    if (!hostWaitRegister (0x34, 1, 1, 100000)) {
+      char err[80];
+      snprintf (err, sizeof (err), "NATIVE_UFS: HCE enable timeout, read=%08x\n", read32 (gHost.hc, 0x34));
+      dali_bootstrap_log (err);
       recordTransport (kIOReturnNotReady, 15);
       *why = "controller enable (HCE) failed";
       return false;
     }
+    dali_bootstrap_log ("NATIVE_UFS: HCE enabled (0x34=1)\n");
   }
 
-  // 2. Device Present (DP): bit 0 of HCS
-  if (!hostWaitRegister (0x30, 1, 1)) {
-    recordTransport (kIOReturnNotReady, 15);
-    *why = "UFS device not present (HCS.DP=0)";
-    return false;
+  // 2. Link startup if Device Present (DP) is not set
+  hcs = read32 (gHost.hc, 0x30);
+  if (!(hcs & 1)) {
+    dali_bootstrap_log ("NATIVE_UFS: DP=0, issuing DME_LINKSTARTUP (0x90=0x16)...\n");
+    // Wait for UCRDY (bit 3) before writing UICCMD
+    if (!hostWaitRegister (0x30, 8, 8, 50000)) {
+      dali_bootstrap_log ("NATIVE_UFS: warning: UCRDY not set before LINKSTARTUP\n");
+    }
+    hostWrite (0x90, 0x16);
+    if (!hostWaitRegister (0x30, 1, 1, 100000)) {
+      char err[80];
+      snprintf (err, sizeof (err), "NATIVE_UFS: link startup timeout, HCS=%08x\n", read32 (gHost.hc, 0x30));
+      dali_bootstrap_log (err);
+      recordTransport (kIOReturnNotReady, 15);
+      *why = "UFS link startup failed (HCS.DP=0)";
+      return false;
+    }
+    char msg[80];
+    snprintf (msg, sizeof (msg), "NATIVE_UFS: link established, HCS=%08x\n", read32 (gHost.hc, 0x30));
+    dali_bootstrap_log (msg);
   }
 
   // 3. Confirm the firmware has no active transfer/task in flight.
+  for (unsigned wait = 0; wait < 5000; wait++) {
+    if (!read32 (gHost.hc, 0x58) && !read32 (gHost.hc, 0x78)) break;
+    IODelay (10);
+  }
   if (read32 (gHost.hc, 0x58) || read32 (gHost.hc, 0x78)) {
-    uint64_t deadline;
-    clock_interval_to_deadline (50, kMillisecondScale, &deadline);
-    while ((read32 (gHost.hc, 0x58) || read32 (gHost.hc, 0x78)) && mach_absolute_time () < deadline) {
-      IODelay (50);
-    }
-    if (read32 (gHost.hc, 0x58) || read32 (gHost.hc, 0x78)) {
-      recordTransport (kIOReturnBusy, 15);
-      *why = "firmware request outstanding";
-      return false;
-    }
+    recordTransport (kIOReturnBusy, 15);
+    *why = "firmware request outstanding";
+    return false;
   }
 
   // 4. Controller fatal error
@@ -72,7 +86,7 @@ static bool hostStopQueue (const char **why)
   hostWrite (0x24, 0);
   if (read32 (gHost.hc, 0x60) & 1) {
     hostWrite (0x60, 0);
-    if (!hostWaitRegister (0x60, 1, 0)) {
+    if (!hostWaitRegister (0x60, 1, 0, 10000)) {
       recordTransport (kIOReturnTimeout, 15);
       *why = "request list stop";
       return false;
@@ -80,7 +94,7 @@ static bool hostStopQueue (const char **why)
   }
   if (read32 (gHost.hc, 0x70) & 1) {
     hostWrite (0x70, 0);
-    if (!hostWaitRegister (0x70, 1, 0)) {
+    if (!hostWaitRegister (0x70, 1, 0, 10000)) {
       recordTransport (kIOReturnTimeout, 15);
       *why = "task management list stop";
       return false;
@@ -104,7 +118,7 @@ static bool hostStartQueue (const char **why)
   gRootDiagnostic.isBefore = read32 (gHost.hc, 0x20);
   hostWrite (0x20, 0xffffffffU); // clear all stale status interrupts
   hostWrite (0x60, 1);
-  if (!hostWaitRegister (0x60, 1, 1) || !hostWaitRegister (0x30, 2, 2)) {
+  if (!hostWaitRegister (0x60, 1, 1, 10000) || !hostWaitRegister (0x30, 2, 2, 50000)) {
     char err[80];
     snprintf (err, sizeof (err), "NATIVE_UFS: startQueue wait failed: RUN=%x HCS=%x\n",
               read32 (gHost.hc, 0x60), read32 (gHost.hc, 0x30));
