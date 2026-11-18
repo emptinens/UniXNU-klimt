@@ -290,7 +290,7 @@ jobs:
             --fastboot-timeout-seconds "$host_timeout" \
             --watchdog-timeout-seconds "$watchdog_timeout"
 
-      - name: Upload source-only XNU for one day
+      - name: Upload source-only XNU for seven days
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dali-xnu-source
@@ -300,4 +300,4 @@ jobs:
             ${{ runner.temp }}/public-artifact/pid1.macho
             ${{ runner.temp }}/public-artifact/pid1.trustcache
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7

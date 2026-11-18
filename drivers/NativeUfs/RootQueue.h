@@ -103,36 +103,63 @@ static bool hostStopQueue (const char **why)
   // 2. Link startup if Device Present (DP) is not set
   hcs = read32 (gHost.hc, 0x30);
   if (!(hcs & 1)) {
-    dali_bootstrap_log ("NATIVE_UFS: DP=0, preparing DME_LINKSTARTUP (0x90=0x16)...\n");
-    // Wait for UCRDY (bit 3) before writing UICCMD
-    bool ucRdy = false;
-    for (unsigned i = 0; i < 5000; i++) {
-      if (read32 (gHost.hc, 0x30) & 8) {
-        ucRdy = true;
-        break;
-      }
-      ufsDelay (10000);
-    }
-    char ucMsg[80];
-    snprintf (ucMsg, sizeof (ucMsg), "NATIVE_UFS: UCRDY=%d (HCS=0x%08x), writing UICCMD...\n",
-              ucRdy ? 1 : 0, read32 (gHost.hc, 0x30));
-    dali_bootstrap_log (ucMsg);
-
-    hostWrite (0x90, 0x16);
+    dali_bootstrap_log ("NATIVE_UFS: DP=0, preparing DME_LINKSTARTUP sequence...\n");
 
     bool dpReady = false;
-    for (unsigned i = 0; i < 20000; i++) { // up to 200 ms
-      if (read32 (gHost.hc, 0x30) & 1) {
-        dpReady = true;
+    for (unsigned attempt = 1; attempt <= 4; attempt++) {
+      // 2a. Wait for UCRDY (bit 3) before writing UICCMD
+      for (unsigned i = 0; i < 5000; i++) {
+        if (read32 (gHost.hc, 0x30) & 8) break;
+        ufsDelay (1000);
+      }
+
+      // 2b. Clear previous UIC completion status in IS (0x20): bit 10 (UCCS) and bit 8 (ULSS)
+      hostWrite (0x20, 0x500);
+
+      // 2c. Write UIC command arguments (0x94, 0x98, 0x9C = 0 for DME_LINKSTARTUP)
+      hostWrite (0x94, 0);
+      hostWrite (0x98, 0);
+      hostWrite (0x9C, 0);
+
+      // 2d. Issue DME_LINKSTARTUP (0x90 = 0x16)
+      hostWrite (0x90, 0x16);
+
+      // 2e. Wait for UIC completion: IS.UCCS (bit 10) or HCS.UCRDY (bit 3)
+      for (unsigned i = 0; i < 20000; i++) {
+        if ((read32 (gHost.hc, 0x20) & 0x400) || (read32 (gHost.hc, 0x30) & 8)) break;
+        ufsDelay (1000);
+      }
+
+      uint32_t isVal = read32 (gHost.hc, 0x20);
+      uint32_t hcsVal = read32 (gHost.hc, 0x30);
+      uint32_t uicResult = read32 (gHost.hc, 0x98) & 0xff;
+
+      char attMsg[128];
+      snprintf (attMsg, sizeof (attMsg),
+                "NATIVE_UFS: DME_LINKSTARTUP att=%u: res=%02x IS=%08x HCS=%08x\n",
+                attempt, uicResult, isVal, hcsVal);
+      dali_bootstrap_log (attMsg);
+
+      // 2f. Poll for DP (Device Present)
+      for (unsigned i = 0; i < 10000; i++) {
+        if (read32 (gHost.hc, 0x30) & 1) {
+          dpReady = true;
+          break;
+        }
+        ufsDelay (2000);
+      }
+
+      if (dpReady) {
+        snprintf (attMsg, sizeof (attMsg),
+                  "NATIVE_UFS: Link established on attempt %u! HCS=%08x\n",
+                  attempt, read32 (gHost.hc, 0x30));
+        dali_bootstrap_log (attMsg);
         break;
       }
-      ufsDelay (10000);
-    }
 
-    char dpMsg[80];
-    snprintf (dpMsg, sizeof (dpMsg), "NATIVE_UFS: Link startup dpReady=%d (HCS=0x%08x)\n",
-              dpReady ? 1 : 0, read32 (gHost.hc, 0x30));
-    dali_bootstrap_log (dpMsg);
+      // Inter-attempt pause to allow M-PHY state machine to settle
+      ufsDelay (100000);
+    }
 
     if (!dpReady) {
       recordTransport (kIOReturnNotReady, 15);
