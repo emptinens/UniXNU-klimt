@@ -16,6 +16,54 @@ static bool hostWaitRegister (unsigned offset, uint32_t mask, uint32_t value, un
   return false;
 }
 
+static bool ufsSendUicCmd (uint32_t cmd, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint32_t *outArg2 = nullptr)
+{
+  for (unsigned i = 0; i < 50000; i++) {
+    if (read32 (gHost.hc, 0x30) & 8) break;
+    ufsDelay (1000);
+  }
+  if (!(read32 (gHost.hc, 0x30) & 8)) {
+    dali_bootstrap_log ("NATIVE_UFS: ufsSendUicCmd: UCRDY timeout before write\n");
+    return false;
+  }
+
+  hostWrite (0x20, 0x504);
+  hostWrite (0x94, arg1);
+  hostWrite (0x98, arg2);
+  hostWrite (0x9C, arg3);
+  hostWrite (0x90, cmd);
+
+  bool done = false;
+  for (unsigned i = 0; i < 100000; i++) {
+    uint32_t is = read32 (gHost.hc, 0x20);
+    if (is & 0x404) {
+      done = true;
+      break;
+    }
+    ufsDelay (1000);
+  }
+
+  uint32_t isVal = read32 (gHost.hc, 0x20);
+  uint32_t resVal = read32 (gHost.hc, 0x98);
+  if (outArg2) *outArg2 = resVal;
+
+  if (!done || (isVal & 4) || ((resVal & 0xff) != 0)) {
+    char err[128];
+    snprintf (err, sizeof (err),
+              "NATIVE_UFS: UIC cmd 0x%02x failed: done=%d IS=%08x res=%02x\n",
+              cmd, done ? 1 : 0, isVal, resVal & 0xff);
+    dali_bootstrap_log (err);
+    return false;
+  }
+  return true;
+}
+
+static bool ufsDmeSet (uint32_t mib, uint32_t val)
+{
+  return ufsSendUicCmd (0x02, (mib & 0xffff) << 16, 0, val);
+}
+
+
 static bool hostStopQueue (const char **why)
 {
   uint32_t cap = read32 (gHost.hc, 0x00);
@@ -105,48 +153,75 @@ static bool hostStopQueue (const char **why)
   if (!(hcs & 1)) {
     dali_bootstrap_log ("NATIVE_UFS: DP=0, preparing DME_LINKSTARTUP sequence...\n");
 
+    // 2a. Disable TX LCC before link startup (MediaTek recommendation)
+    bool lccOk = ufsDmeSet (0x155e, 0);
+    char lccMsg[80];
+    snprintf (lccMsg, sizeof (lccMsg), "NATIVE_UFS: TX_LCC disable res=%d\n", lccOk ? 1 : 0);
+    dali_bootstrap_log (lccMsg);
+
     bool dpReady = false;
-    for (unsigned attempt = 1; attempt <= 4; attempt++) {
-      // 2a. Wait for UCRDY (bit 3) before writing UICCMD
-      for (unsigned i = 0; i < 5000; i++) {
+    for (unsigned attempt = 1; attempt <= 3; attempt++) {
+      // 2b. Wait for UCRDY (bit 3) before writing UICCMD
+      for (unsigned i = 0; i < 50000; i++) {
         if (read32 (gHost.hc, 0x30) & 8) break;
         ufsDelay (1000);
       }
 
-      // 2b. Clear previous UIC completion status in IS (0x20): bit 10 (UCCS) and bit 8 (ULSS)
-      hostWrite (0x20, 0x500);
+      // 2c. Clear previous UIC completion status and errors: UCCS (0x400), ULSS (0x100), UE (0x04)
+      hostWrite (0x20, 0x504);
 
-      // 2c. Write UIC command arguments (0x94, 0x98, 0x9C = 0 for DME_LINKSTARTUP)
+      // 2d. Write UIC command arguments (0 for DME_LINKSTARTUP)
       hostWrite (0x94, 0);
       hostWrite (0x98, 0);
       hostWrite (0x9C, 0);
 
-      // 2d. Issue DME_LINKSTARTUP (0x90 = 0x16)
+      // 2e. Issue DME_LINKSTARTUP (0x16)
       hostWrite (0x90, 0x16);
 
-      // 2e. Wait for UIC completion: IS.UCCS (bit 10) or HCS.UCRDY (bit 3)
-      for (unsigned i = 0; i < 20000; i++) {
-        if ((read32 (gHost.hc, 0x20) & 0x400) || (read32 (gHost.hc, 0x30) & 8)) break;
-        ufsDelay (1000);
+      // 2f. Wait strictly for IS.UCCS (0x400) or IS.UE (0x04)
+      // Link startup negotiation takes 50-500 ms (up to 1000 ms per UFSHCI spec).
+      // Each step: ufsDelay(300000) ~ 1 ms.
+      bool uicDone = false;
+      for (unsigned step = 0; step < 1200; step++) {
+        uint32_t is = read32 (gHost.hc, 0x20);
+        if (is & 0x404) {
+          uicDone = true;
+          break;
+        }
+        if (step == 50 || step == 150 || step == 300 || step == 600 || step == 1000) {
+          char pollMsg[128];
+          snprintf (pollMsg, sizeof (pollMsg),
+                    "NATIVE_UFS: link poll %u ms: HCS=%08x IS=%08x\n",
+                    step, read32 (gHost.hc, 0x30), is);
+          dali_bootstrap_log (pollMsg);
+        }
+        ufsDelay (300000);
       }
 
       uint32_t isVal = read32 (gHost.hc, 0x20);
       uint32_t hcsVal = read32 (gHost.hc, 0x30);
-      uint32_t uicResult = read32 (gHost.hc, 0x98) & 0xff;
+      uint32_t uicRes = read32 (gHost.hc, 0x98) & 0xff;
+      uint32_t uecpa = read32 (gHost.hc, 0x38);
+      uint32_t uecdl = read32 (gHost.hc, 0x3c);
 
-      char attMsg[128];
+      char attMsg[160];
       snprintf (attMsg, sizeof (attMsg),
-                "NATIVE_UFS: DME_LINKSTARTUP att=%u: res=%02x IS=%08x HCS=%08x\n",
-                attempt, uicResult, isVal, hcsVal);
+                "NATIVE_UFS: DME_LINKSTARTUP att=%u: done=%d res=%02x IS=%08x HCS=%08x UECPA=%08x UECDL=%08x\n",
+                attempt, uicDone ? 1 : 0, uicRes, isVal, hcsVal, uecpa, uecdl);
       dali_bootstrap_log (attMsg);
 
-      // 2f. Poll for DP (Device Present)
-      for (unsigned i = 0; i < 10000; i++) {
-        if (read32 (gHost.hc, 0x30) & 1) {
-          dpReady = true;
-          break;
+      // 2g. Check if DP (Device Present) is established
+      if (hcsVal & 1) {
+        dpReady = true;
+      } else {
+        // Poll for DP up to 200 ms if UCCS arrived before DP assertion
+        for (unsigned p = 0; p < 200; p++) {
+          if (read32 (gHost.hc, 0x30) & 1) {
+            dpReady = true;
+            break;
+          }
+          ufsDelay (300000);
         }
-        ufsDelay (2000);
       }
 
       if (dpReady) {
@@ -157,8 +232,9 @@ static bool hostStopQueue (const char **why)
         break;
       }
 
-      // Inter-attempt pause to allow M-PHY state machine to settle
-      ufsDelay (100000);
+      // Settle pause before retry: clear IS and pause 100 ms
+      hostWrite (0x20, 0x504);
+      ufsDelay (30000000);
     }
 
     if (!dpReady) {
